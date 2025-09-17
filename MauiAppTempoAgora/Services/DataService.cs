@@ -1,68 +1,75 @@
 ﻿using MauiAppTempoAgora.Models;
-using Newtonsoft.Json.Linq;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 namespace MauiAppTempoAgora.Services
 {
-    public class DataService
+    public static class DataService
     {
+        private static readonly string apiKey = "6135072afe7f6cec1537d5cb08a5a1a2";
+        private static readonly string baseUrl = "https://api.openweathermap.org/data/2.5/weather";
 
-        public static  async Task<Tempo?> GetPrevisao(string cidade)
+        public static async Task<Tempo?> GetPrevisao(string cidade)
         {
-            Tempo? t = null;
-            string chave = "6135072afe7f6cec1537d5cb08a5a1a2";
+            using HttpClient client = new HttpClient();
+            string url = $"{baseUrl}?q={cidade}&appid={apiKey}&units=metric&lang=pt_br";
 
-            string url = $"https://api.openweathermap.org/data/2.5/weather" +
-                         $"?q={cidade},BR&units=metric&appid={chave}";
+            HttpResponseMessage response = await client.GetAsync(url);
 
-            using (HttpClient Client = new HttpClient())
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            string json = await response.Content.ReadAsStringAsync();
+            using JsonDocument doc = JsonDocument.Parse(json);
+
+            Tempo t = new Tempo();
+
+            // Coord
+            if (doc.RootElement.TryGetProperty("coord", out JsonElement coord))
             {
-                HttpResponseMessage resp= await Client.GetAsync(url);
-                if (resp.IsSuccessStatusCode)
-                {
-                    string json =  await resp.Content.ReadAsStringAsync();
+                t.lon = coord.GetProperty("lon").GetDouble();
+                t.lat = coord.GetProperty("lat").GetDouble();
+            }
 
-                    var rascunho = JObject.Parse(json);
+            // Main
+            if (doc.RootElement.TryGetProperty("main", out JsonElement main))
+            {
+                t.temp_min = main.GetProperty("temp_min").GetDouble();
+                t.temp_max = main.GetProperty("temp_max").GetDouble();
+            }
 
-                    DateTime time = new();
-                    DateTime sunsire = time.AddSeconds((double)rascunho["sys"]["sunrise"]).ToLocalTime();
-                    DateTime sunset = time.AddSeconds((double)rascunho["sys"]["sunset"]).ToLocalTime();
+            // Weather (array)
+            if (doc.RootElement.TryGetProperty("weather", out JsonElement weatherArray) && weatherArray.GetArrayLength() > 0)
+            {
+                var weather = weatherArray[0];
+                t.main = weather.GetProperty("main").GetString();
+                t.description = weather.GetProperty("description").GetString();
+            }
 
+            // Wind
+            if (doc.RootElement.TryGetProperty("wind", out JsonElement wind))
+            {
+                t.speed = wind.GetProperty("speed").GetDouble();
+            }
 
+            // Visibility
+            if (doc.RootElement.TryGetProperty("visibility", out JsonElement visibility))
+            {
+                t.visibility = visibility.GetInt32();
+            }
 
-                    t = new()
-                    {
-                        lat = (double)rascunho["coord"]["lat"],
-                        lon = (double)rascunho["coord"]["lat"],
-                        description = (string)rascunho["weather"][0]["description"],
-                        main = (string)rascunho["weather"][0]["main"],
-                        temp_min = (double)rascunho["main"] ["temp_min"],
-                        temp_max = (double)rascunho["main"]["temp_max"],
-                        speed = (double)rascunho["wind"]["speed"],
-                        visibility = (int)rascunho["visibility"],
-                        sunrise = sunsire.ToString(),
-                        sunset = sunset.ToString(),
+            // Sys (sunrise/sunset)
+            if (doc.RootElement.TryGetProperty("sys", out JsonElement sys))
+            {
+                long sunriseUnix = sys.GetProperty("sunrise").GetInt64();
+                long sunsetUnix = sys.GetProperty("sunset").GetInt64();
 
-
-                    }; // Fecha obj do tempo.
-
-                } // Fecha if se o status do servidor foi de sucesso
-
-
-            } // fecha laço using
-
+                t.sunrise = DateTimeOffset.FromUnixTimeSeconds(sunriseUnix).ToLocalTime().ToString("HH:mm");
+                t.sunset = DateTimeOffset.FromUnixTimeSeconds(sunsetUnix).ToLocalTime().ToString("HH:mm");
+            }
 
             return t;
-
-        } 
-
-
-
-
-
-
-
-
-
-
+        }
     }
 }
+
